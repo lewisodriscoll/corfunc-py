@@ -130,7 +130,21 @@ def extract(x, y):
     linear_point = zeros[0]
     linear_point = int(mins[0]/10)
 
-    m = np.mean(dy[linear_point-40:linear_point+40])  # Linear slope
+    # Try to calculate slope around linear_point using 80 data points
+    lower = linear_point - 40
+    upper = linear_point + 40
+
+    # If too few data points to the left, use linear_point*2 data points
+    if lower < 0:
+        lower = 0
+        upper = linear_point * 2
+    # If too few to right, use 2*(dy.size - linear_point) data points
+    elif upper > dy.size:
+        upper = dy.size
+        width = dy.size - linear_point
+        lower = 2*linear_point - dy.size
+
+    m = np.mean(dy[lower:upper])  # Linear slope
     b = y[1:-1][linear_point]-m*x[1:-1][linear_point]  # Linear intercept
 
     Lc = (GammaMin-b)/m  # Hard block thickness
