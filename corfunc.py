@@ -10,12 +10,6 @@ from scipy.signal import argrelextrema
 from numpy.linalg import lstsq
 import warnings
 
-#Global Variables
-# These really need to be made into options
-# MAXQ = 0.04
-# MINQ = 0.0065*3
-MAXQ = 0.095
-MINQ = 0.04
 
 # Pretend Python allows for anonymous classes
 class Struct:
@@ -236,8 +230,12 @@ if __name__ == "__main__":
 
     parser.add_argument('FILE', nargs="+",
                         help='Scattering data in two column ascii format')
+    parser.add_argument('MINQ', nargs='+',
+                        help='Minimum Q value to use')
+    parser.add_argument('MAXQ', nargs='+',
+                        help='Maximum Q value to use')
     args = parser.parse_args()
 
-    main(args.FILE, (MINQ, MAXQ),
+    main(args.FILE, (float(args.MINQ[0]), float(args.MAXQ[0])),
          args.background, args.export,
          args.plot, args.saveImage)
