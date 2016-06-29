@@ -8,14 +8,14 @@ from scipy.interpolate import interp1d
 from scipy.fftpack import dct
 from scipy.signal import argrelextrema
 from numpy.linalg import lstsq
-
+import warnings
 
 #Global Variables
-#These really need to be made into options
-MAXQ = 0.04
-MINQ = 0.0065*3
-
-
+# These really need to be made into options
+# MAXQ = 0.04
+# MINQ = 0.0065*3
+MAXQ = 0.095
+MINQ = 0.04
 
 # Pretend Python allows for anonymous classes
 class Struct:
@@ -48,7 +48,10 @@ def smooth(f, g, start, stop):
         ys = np.zeros(x.shape)
         ys[x <= start] = f(x[x <= start])
         ys[x >= stop] = g(x[x >= stop])
-        h = 1/(1+(x-stop)**2/(start-x)**2)
+        with warnings.catch_warnings():
+            # Ignore divide by zero error
+            warnings.simplefilter('ignore')
+            h = 1/(1+(x-stop)**2/(start-x)**2)
         mask = np.logical_and(x > start, x < stop)
         ys[mask] = h[mask]*g(x[mask])+(1-h[mask])*f(x[mask])
         return ys
@@ -108,8 +111,9 @@ def corr(f, qrange, background=None):
 
 def extract(x, y):
     """Extract the interesting measurements from a correlation function"""
-    maxs = argrelextrema(y, np.greater)[0]  # A list of the maxima
-    mins = argrelextrema(y, np.less)[0]  # A list of the minima
+    # Calculate indexes of maxima and minima
+    maxs = argrelextrema(y, np.greater)[0]
+    mins = argrelextrema(y, np.less)[0]
 
     # If there are no maxima, return NaN
     garbage = Struct(minimum=np.nan,
