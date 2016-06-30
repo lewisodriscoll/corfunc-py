@@ -11,6 +11,35 @@ from numpy.linalg import lstsq
 import warnings
 
 
+class Interpolator(object):
+    def __init__(self, f, g, start, stop):
+        self.f = f
+        self.g = g
+        self.start = start
+        self.stop = stop
+        self._lastx = []
+        self._lasty = []
+
+    def __call__(self, x):
+        if self._lastx == [] or x.tolist() != self._lastx.tolist():
+            self._lasty = self._smoothed_function(x)
+            self._lastx = x
+        return self._lasty
+
+    def _smoothed_function(self,x):
+        print("_smoothed_function called")
+        ys = np.zeros(x.shape)
+        ys[x <= self.start] = self.f(x[x <= self.start])
+        ys[x >= self.stop] = self.g(x[x >= self.stop])
+        with warnings.catch_warnings():
+            # Ignore divide by zero error
+            warnings.simplefilter('ignore')
+            h = 1/(1+(x-self.stop)**2/(self.start-x)**2)
+        mask = np.logical_and(x > self.start, x < self.stop)
+        ys[mask] = h[mask]*self.g(x[mask])+(1-h[mask])*self.f(x[mask])
+        return ys
+
+
 # Pretend Python allows for anonymous classes
 class Struct:
     def __init__(self, **entries):
@@ -33,34 +62,6 @@ def fitguinier(q, iq):
     return lstsq(A, np.log(iq))
 
 
-# FIXME: result_array is recalculated on every call, when it should
-# just be cached on creation.  Closure is a poor man's object and all
-# that.
-def smooth(f, g, start, stop):
-    """Interpolate from curve f to curve g over the range from start to stop"""
-    def result_array(x):
-        ys = np.zeros(x.shape)
-        ys[x <= start] = f(x[x <= start])
-        ys[x >= stop] = g(x[x >= stop])
-        with warnings.catch_warnings():
-            # Ignore divide by zero error
-            warnings.simplefilter('ignore')
-            h = 1/(1+(x-stop)**2/(start-x)**2)
-        mask = np.logical_and(x > start, x < stop)
-        ys[mask] = h[mask]*g(x[mask])+(1-h[mask])*f(x[mask])
-        return ys
-
-    def result_scalar(x):
-        return result_array(np.array([x]))[0]
-
-    def result(x):
-        if type(x) is np.ndarray:
-            return result_array(x)
-        else:
-            return result_scalar(x)
-    return result
-
-
 def fit_data(q, iq, qrange):
     """Given a data set, extrapolate out to large q with Porod
     and to q=0 with Guinier"""
@@ -69,18 +70,24 @@ def fit_data(q, iq, qrange):
 
     mask = q > maxq
 
+    # Returns an array where the 1st and 2nd elements are the values of k and
+    # sigma for the best-fit Porod function
     fitp = curve_fit(lambda q, k, sig: porod(q, k, sig)*q**2,
                      q[mask], iq[mask]*q[mask]**2)[0]
 
+    # Smooths between the best-fit porod function and the data to produce a
+    # better fitting curve
     data = interp1d(q, iq)
-    s1 = smooth(data, lambda x: porod(x, fitp[0], fitp[1]), maxq, q[-1])
+    s1 = Interpolator(data, lambda x: porod(x, fitp[0], fitp[1]), maxq, q[-1])
 
     mask = np.logical_and(q < minq, 0 < q)
-    mask[0:6] = False
+    # mask[0:6] = False
 
+    # Returns parameters for the best-fit Guinier function
     g = fitguinier(q[mask], iq[mask])[0]
 
-    s2 = smooth(lambda x: (np.exp(g[1]+g[0]*x**2)), s1, q[0], minq)
+    # Smooths between the best-fit Guinier function and the Porod curve
+    s2 = Interpolator((lambda x: (np.exp(g[1]+g[0]*x**2))), s1, q[0], minq)
 
     return s2
 
