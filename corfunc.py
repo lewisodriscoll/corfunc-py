@@ -27,7 +27,6 @@ class Interpolator(object):
         return self._lasty
 
     def _smoothed_function(self,x):
-        print("_smoothed_function called")
         ys = np.zeros(x.shape)
         ys[x <= self.start] = self.f(x[x <= self.start])
         ys[x >= self.stop] = self.g(x[x >= self.stop])
