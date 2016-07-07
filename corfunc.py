@@ -61,13 +61,11 @@ def fitguinier(q, iq):
     return lstsq(A, np.log(iq))
 
 
-def fit_data(q, iq, qrange):
+def fit_data(q, iq, lowerq, upperq):
     """Given a data set, extrapolate out to large q with Porod
     and to q=0 with Guinier"""
 
-    minq, maxq = qrange
-
-    mask = q > maxq
+    mask = np.logical_and(q > upperq[0], q < upperq[1])
 
     # Returns an array where the 1st and 2nd elements are the values of k and
     # sigma for the best-fit Porod function
@@ -77,21 +75,20 @@ def fit_data(q, iq, qrange):
     # Smooths between the best-fit porod function and the data to produce a
     # better fitting curve
     data = interp1d(q, iq)
-    s1 = Interpolator(data, lambda x: porod(x, fitp[0], fitp[1]), maxq, q[-1])
+    s1 = Interpolator(data, lambda x: porod(x, fitp[0], fitp[1]), upperq[0], q[-1])
 
-    mask = np.logical_and(q < minq, 0 < q)
-    # mask[0:6] = False
+    mask = np.logical_and(q < lowerq, 0 < q)
 
     # Returns parameters for the best-fit Guinier function
     g = fitguinier(q[mask], iq[mask])[0]
 
     # Smooths between the best-fit Guinier function and the Porod curve
-    s2 = Interpolator((lambda x: (np.exp(g[1]+g[0]*x**2))), s1, q[0], minq)
+    s2 = Interpolator((lambda x: (np.exp(g[1]+g[0]*x**2))), s1, q[0], lowerq)
 
     return s2
 
 
-def corr(f, qrange, background=None):
+def corr(f, lowerq, upperq, background=None):
     """Transform a scattering curve into a correlation function"""
     orig = np.loadtxt(f, skiprows=1, dtype=np.float32)
     if background is None:
@@ -101,11 +98,21 @@ def corr(f, qrange, background=None):
     q = orig[:480, 0]
     iq = orig[:480, 1]
     iq -= back[:480]
-    s2 = fit_data(q, iq, qrange)
+
+    if lowerq <= q.min():
+        raise Exception("MINQ must be greater than the lowest q value")
+    if upperq[1] > q.max():
+        raise Exception("UPQ2 must be less than or equal to the greatest q value").
+    if upperq[0] > upperq[1]:
+        raise Exception("UPQ1 must be less than UPQ2")
+
+    s2 = fit_data(q, iq, lowerq, upperq)
     qs = np.arange(0, q[-1]*100, (q[1]-q[0]))
-    iqs = s2(qs)*qs**2
-    transform = dct(iqs)
-    xs = np.pi*np.arange(len(qs))/(q[1]-q[0])/len(qs)
+    iqs = s2(qs)
+    transform = dct(iqs*qs**2)
+    transform = transform / transform.max()
+    xs = np.pi*np.arange(len(qs),dtype=np.float32)/(q[1]-q[0])/len(qs)
+
     return (xs, transform)
 
 
@@ -173,18 +180,21 @@ values = []
 specs = []
 
 
-def main(files, qrange, background=None, export=None, plot=False, save=None):
+def main(files, lowerq, upperq, background=None, export=None, plot=False, save=None):
     """Load a set of intensity curves and gathers the relevant statistics"""
     import os.path
 
     for f in files:
-        x, y = corr(f, qrange, background)
-        plt.plot(x, y, label=os.path.basename(f))
+        x, y = corr(f, lowerq, upperq, background)
+        plt.plot(x, y, label=label=os.path.basename(f))
         values.append(extract(x, y))
         specs.append(y)
         x0 = x
-    plt.xlabel("Distance [nm]")
+
+    plt.xlabel("Distance [Angstroms]")
     plt.ylabel("Correlation")
+    plt.axhline(0,color='k')
+    plt.xlim([0,200])
     plt.legend()
 
     if plot:
@@ -236,12 +246,17 @@ if __name__ == "__main__":
 
     parser.add_argument('FILE', nargs="+",
                         help='Scattering data in two column ascii format')
-    parser.add_argument('MINQ', nargs='+',
-                        help='Minimum Q value to use')
-    parser.add_argument('MAXQ', nargs='+',
-                        help='Maximum Q value to use')
+    parser.add_argument('LOWQ', nargs='+',
+                        help='Values less than this will beused for back extrapolation')
+    parser.add_argument('UPQ1', nargs='+',
+                        help='Lower bound of values to use for forward extrapolation')
+    parser.add_argument('UPQ2', nargs='+',
+                        help='Upper bound of values to use for forward extrapolation')
     args = parser.parse_args()
 
-    main(args.FILE, (float(args.MINQ[0]), float(args.MAXQ[0])),
+    lowerq = float(args.LOWQ[0])
+    upperq = (float(args.UPQ1[0]), float(args.UPQ2[0]))
+
+    main(args.FILE, lowerq, upperq,
          args.background, args.export,
          args.plot, args.saveImage)
