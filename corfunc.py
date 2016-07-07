@@ -45,9 +45,9 @@ class Struct:
         self.__dict__.update(entries)
 
 
-def porod(q, K, sigma):
+def porod(q, K, sigma,bg):
     """Calculate the Porod region of a curve"""
-    return (K*q**(-4))*np.exp(-q**2*sigma**2)
+    return bg+(K*q**(-4))*np.exp(-q**2*sigma**2)
 
 
 def guinier(q, A, B):
@@ -55,61 +55,63 @@ def guinier(q, A, B):
     return A*np.exp(B*q**2)
 
 
-def fitguinier(q, iq):
+def fit_guinier(q, iq):
     """Fit the Guinier region of a curve"""
     A = np.vstack([q**2, np.ones(q.shape)]).T
     return lstsq(A, np.log(iq))
 
+def fit_porod(q, iq):
+    """Fit the Porod region of a curve"""
+    fitp = curve_fit(lambda q, k, sig, bg: porod(q, k, sig, bg)*q**2,
+                     q, iq*q**2)[0]
+    [k, sigma, bg] = fitp
+    return k, sigma, bg
+
 
 def fit_data(q, iq, lowerq, upperq):
-    """Given a data set, extrapolate out to large q with Porod
-    and to q=0 with Guinier"""
+    """
+    Given a data set, extrapolate out to large q with Porod
+    and to q=0 with Guinier
+    """
 
     mask = np.logical_and(q > upperq[0], q < upperq[1])
 
-    # Returns an array where the 1st and 2nd elements are the values of k and
-    # sigma for the best-fit Porod function
-    fitp = curve_fit(lambda q, k, sig: porod(q, k, sig)*q**2,
-                     q[mask], iq[mask]*q[mask]**2)[0]
+    # Returns the values of k, sigma and bg for the best fitting Porod curve
+    k, sigma, bg = fit_porod(q[mask], iq[mask])
 
     # Smooths between the best-fit porod function and the data to produce a
     # better fitting curve
     data = interp1d(q, iq)
-    s1 = Interpolator(data, lambda x: porod(x, fitp[0], fitp[1]), upperq[0], q[-1])
+    s1 = Interpolator(data, lambda x: porod(x, k, sigma, bg), upperq[0], q[-1])
 
     mask = np.logical_and(q < lowerq, 0 < q)
 
     # Returns parameters for the best-fit Guinier function
-    g = fitguinier(q[mask], iq[mask])[0]
+    g = fit_guinier(q[mask], iq[mask])[0]
 
     # Smooths between the best-fit Guinier function and the Porod curve
     s2 = Interpolator((lambda x: (np.exp(g[1]+g[0]*x**2))), s1, q[0], lowerq)
 
-    return s2
+    return s2, bg
 
 
-def corr(f, lowerq, upperq, background=None):
+def corr(f, lowerq, upperq):
     """Transform a scattering curve into a correlation function"""
     orig = np.loadtxt(f, skiprows=1, dtype=np.float32)
-    if background is None:
-        back = np.zeros(orig. shape)[:, 1]
-    else:
-        back = np.loadtxt(background, skiprows=1, dtype=np.float32)[:, 1]
     q = orig[:480, 0]
     iq = orig[:480, 1]
-    iq -= back[:480]
 
     if lowerq <= q.min():
         raise Exception("MINQ must be greater than the lowest q value")
     if upperq[1] > q.max():
-        raise Exception("UPQ2 must be less than or equal to the greatest q value").
+        raise Exception("UPQ2 must be less than or equal to the greatest q value")
     if upperq[0] > upperq[1]:
         raise Exception("UPQ1 must be less than UPQ2")
 
-    s2 = fit_data(q, iq, lowerq, upperq)
+    s2, bg = fit_data(q, iq, lowerq, upperq)
     qs = np.arange(0, q[-1]*100, (q[1]-q[0]))
     iqs = s2(qs)
-    transform = dct(iqs*qs**2)
+    transform = dct((iqs-bg)*qs**2)
     transform = transform / transform.max()
     xs = np.pi*np.arange(len(qs),dtype=np.float32)/(q[1]-q[0])/len(qs)
 
@@ -180,13 +182,13 @@ values = []
 specs = []
 
 
-def main(files, lowerq, upperq, background=None, export=None, plot=False, save=None):
+def main(files, lowerq, upperq, export=None, plot=False, save=None):
     """Load a set of intensity curves and gathers the relevant statistics"""
     import os.path
 
     for f in files:
-        x, y = corr(f, lowerq, upperq, background)
-        plt.plot(x, y, label=label=os.path.basename(f))
+        x, y = corr(f, lowerq, upperq)
+        plt.plot(x, y, label=os.path.basename(f))
         values.append(extract(x, y))
         specs.append(y)
         x0 = x
@@ -233,8 +235,6 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(
         description='Perform correlation function analysis on scattering data')
-    parser.add_argument('--background', action='store',
-                        help='A background measurement for subtraction')
     parser.add_argument('--export', action='store',
                         help='Export the extracted real space data to a file')
 
@@ -257,6 +257,5 @@ if __name__ == "__main__":
     lowerq = float(args.LOWQ[0])
     upperq = (float(args.UPQ1[0]), float(args.UPQ2[0]))
 
-    main(args.FILE, lowerq, upperq,
-         args.background, args.export,
+    main(args.FILE, lowerq, upperq, args.export,
          args.plot, args.saveImage)
